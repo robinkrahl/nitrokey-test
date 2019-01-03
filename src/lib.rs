@@ -71,7 +71,8 @@
 //! The crate simplifies test creation by providing an attribute macro
 //! that generates code for running a test on up to two devices (a
 //! Nitrokey Pro and Nitrokey Storage) and takes care of serializing all
-//! tests tagged with this attribute.
+//! tests tagged with this attribute, and causes them to be skipped if
+//! the respective device is not present.
 //!
 //! Right now we make a few simplifying assumptions that, although not
 //! changing what can be expressed and tested, can lead to unexpected
@@ -228,6 +229,52 @@ fn expand_serializer() -> Tokens {
   }
 }
 
+fn expand_connect(dev_type: Tokens, ret_type: &syn::ReturnType) -> Tokens {
+  let (ret, check) = match ret_type {
+    syn::ReturnType::Default => (quote! { return }, quote! {.unwrap()}),
+    // The only two valid return types for a test function are no return
+    // value or a Result. We assume a Result<V, E> in this path. Note
+    // that we furthermore assume that V=(). Once the trait
+    // std::process::Termination stabilized we should be able to do away
+    // with the latter assumption.
+    syn::ReturnType::Type(_, _) => (quote! { return Ok(()) }, quote! {?}),
+  };
+
+  quote! {
+    {
+      use ::std::io::Write;
+      // Check if we can connect. Skip the test if we can't due to the
+      // device not being present.
+      // TODO: There should be a better error code returned on the
+      //       `nitrokey` side of things.
+      let result = ::nitrokey::#dev_type::connect();
+      if let Err(::nitrokey::CommandError::Undefined) = result {
+        // Note that tests have a "special" stdout, used by println!()
+        // for example, that has a thread-local buffer and is not
+        // actually printed by default but only when the --nocapture
+        // option is present. Alternatively, they can use
+        // std::io::stdout directly, which will always appear.
+        // Unfortunately, neither works properly in concurrent contexts.
+        // That is, output can always be interleaved randomly. Note that
+        // we do serialize tests, but there will always be a window for
+        // races, because we have to release the mutex before the
+        // "outer" test infrastructure prints the result.
+        // For that matter, we use the thread local version to print
+        // information about whether a test is skipped. This way, the
+        // user can get this information but given that it likely is
+        // somewhat garbled we do not want it to manifest by default.
+        // This is really a short coming of the Rust testing
+        // infrastructure and there is nothing we can do about that. It
+        // is a surprise, though, that even the thread-locally buffered
+        // version has this problem.
+        println!("skipped");
+        #ret
+      }
+      result#check
+    }
+  }
+}
+
 /// Emit code for a wrapper function around a Nitrokey test function.
 fn expand_wrapper<S>(fn_name: S, device: EmittedDevice, wrappee: &syn::ItemFn) -> Tokens
 where
@@ -240,13 +287,13 @@ where
   let name = Ident::new(fn_name.as_ref(), Span::call_site());
   let decl = &wrappee.decl;
   let body = &wrappee.block;
-  let (ret_type, check) = match &decl.output {
-    syn::ReturnType::Default => (quote! {()}, quote! {.unwrap()}),
-    syn::ReturnType::Type(_, type_) => (quote! {#type_}, quote! {?}),
+  let ret_type = match &decl.output {
+    syn::ReturnType::Default => quote! {()},
+    syn::ReturnType::Type(_, type_) => quote! {#type_},
   };
 
-  let connect_pro = quote! {::nitrokey::Pro::connect()#check};
-  let connect_storage = quote! {::nitrokey::Storage::connect()#check};
+  let connect_pro = expand_connect(quote! { Pro }, &decl.output);
+  let connect_storage = expand_connect(quote! { Storage }, &decl.output);
 
   let connect = match device {
     EmittedDevice::Pro => connect_pro,
