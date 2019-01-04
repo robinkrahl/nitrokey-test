@@ -74,6 +74,16 @@
 //! tests tagged with this attribute, and causes them to be skipped if
 //! the respective device is not present.
 //!
+//! It also provides support for running tests belonging to a certain
+//! group. There are three groups: "nodev" (representing tests that run
+//! when no device is present), "pro" (encompassing tests eligible to
+//! run on the Nitrokey Pro), and "storage" (for tests running against a
+//! Nitrokey Storage device).
+//! Running tests of a specific group (and only those) can be
+//! accomplished by setting the `NITROKEY_TEST_GROUP` environment
+//! variable to the group of interest. Note that in this mode tests will
+//! fail if the respective device is not present.
+//!
 //! Right now we make a few simplifying assumptions that, although not
 //! changing what can be expressed and tested, can lead to unexpected
 //! error messages when not known:
@@ -89,10 +99,27 @@ use std::sync::atomic;
 
 use proc_macro::TokenStream;
 use proc_macro2::Ident;
+use proc_macro2::Literal;
 use proc_macro2::Span;
 use proc_macro2::TokenStream as Tokens;
 use quote::quote;
+use quote::TokenStreamExt;
 use syn::punctuated;
+
+
+/// The name of an optional environment variable we honor that can be
+/// set to one of the supported groups and will cause only tests of this
+/// particular group to be run.
+const NITROKEY_TEST_GROUP: &str = "NITROKEY_TEST_GROUP";
+/// The name of the group containing tests that run when no device is
+/// present.
+const NITROKEY_GROUP_NODEV: &str = "nodev";
+/// The name of the group containing tests that run when the Nitrokey
+/// Pro is present.
+const NITROKEY_GROUP_PRO: &str = "pro";
+/// The name of the group containing tests that run when the Nitrokey
+/// Storage is present.
+const NITROKEY_GROUP_STORAGE: &str = "storage";
 
 
 /// A type used to determine what Nitrokey device to test on.
@@ -137,6 +164,22 @@ enum DeviceGroup {
   Pro,
   /// The group containing all tests for the Nitrokey Storage.
   Storage,
+}
+
+impl AsRef<str> for DeviceGroup {
+  fn as_ref(&self) -> &str {
+    match *self {
+      DeviceGroup::No => NITROKEY_GROUP_NODEV,
+      DeviceGroup::Pro => NITROKEY_GROUP_PRO,
+      DeviceGroup::Storage => NITROKEY_GROUP_STORAGE,
+    }
+  }
+}
+
+impl quote::ToTokens for DeviceGroup {
+  fn to_tokens(&self, tokens: &mut Tokens) {
+    tokens.append(Literal::string(self.as_ref()))
+  }
 }
 
 
@@ -281,6 +324,12 @@ fn expand_connect(group: DeviceGroup, ret_type: &syn::ReturnType) -> Tokens {
     DeviceGroup::Storage => quote! { ::nitrokey::Storage::connect() },
   };
 
+  let connect_cond = if let DeviceGroup::No = group {
+    quote! { }
+  } else {
+    quote! { #connect#check }
+  };
+
   // TODO: There should be a better error code returned on the
   //       `nitrokey` side of things.
   let skip = if let DeviceGroup::No = group {
@@ -289,35 +338,64 @@ fn expand_connect(group: DeviceGroup, ret_type: &syn::ReturnType) -> Tokens {
     quote! {let Err(::nitrokey::CommandError::Undefined) = result}
   };
 
+  let result = if let DeviceGroup::No = group {
+    quote! { }
+  } else {
+    quote! { result#check }
+  };
+
   quote! {
     {
       use ::std::io::Write;
-      // Check if we can connect. Skip the test if we can't due to the
-      // device not being present.
-      let result = #connect;
-      if #skip {
-        // Note that tests have a "special" stdout, used by println!()
-        // for example, that has a thread-local buffer and is not
-        // actually printed by default but only when the --nocapture
-        // option is present. Alternatively, they can use
-        // std::io::stdout directly, which will always appear.
-        // Unfortunately, neither works properly in concurrent contexts.
-        // That is, output can always be interleaved randomly. Note that
-        // we do serialize tests, but there will always be a window for
-        // races, because we have to release the mutex before the
-        // "outer" test infrastructure prints the result.
-        // For that matter, we use the thread local version to print
-        // information about whether a test is skipped. This way, the
-        // user can get this information but given that it likely is
-        // somewhat garbled we do not want it to manifest by default.
-        // This is really a short coming of the Rust testing
-        // infrastructure and there is nothing we can do about that. It
-        // is a surprise, though, that even the thread-locally buffered
-        // version has this problem.
-        println!("skipped");
-        #ret
+      match ::std::env::var(#NITROKEY_TEST_GROUP) {
+        Ok(group) => {
+          match group.as_ref() {
+            #NITROKEY_GROUP_NODEV |
+            #NITROKEY_GROUP_PRO |
+            #NITROKEY_GROUP_STORAGE => {
+              if group == #group {
+                #connect_cond
+              } else {
+                println!("skipped");
+                #ret
+              }
+            },
+            x => panic!("unsupported {} value: {}", #NITROKEY_TEST_GROUP, x),
+          }
+        },
+        Err(::std::env::VarError::NotUnicode(_)) => {
+          panic!("{} value is not valid unicode", #NITROKEY_TEST_GROUP)
+        },
+        Err(::std::env::VarError::NotPresent) => {
+          // Check if we can connect. Skip the test if we can't due to the
+          // device not being present.
+          let result = #connect;
+          if #skip {
+            // Note that tests have a "special" stdout, used by
+            // println!() for example, that has a thread-local buffer
+            // and is not actually printed by default but only when the
+            // --nocapture option is present. Alternatively, they can
+            // use std::io::stdout directly, which will always appear.
+            // Unfortunately, neither works properly in concurrent
+            // contexts. That is, output can always be interleaved
+            // randomly. Note that we do serialize tests, but there will
+            // always be a window for races, because we have to release
+            // the mutex before the "outer" test infrastructure prints
+            // the result.
+            // For that matter, we use the thread local version to print
+            // information about whether a test is skipped. This way,
+            // the user can get this information but given that it
+            // likely is somewhat garbled we do not want it to manifest
+            // by default. This is really a short coming of the Rust
+            // testing infrastructure and there is nothing we can do
+            // about that. It is a surprise, though, that even the
+            // thread-locally buffered version has this problem.
+            println!("skipped");
+            #ret
+          }
+          #result
+        },
       }
-      result#check
     }
   }
 }
