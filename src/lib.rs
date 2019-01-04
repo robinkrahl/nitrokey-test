@@ -183,7 +183,7 @@ impl quote::ToTokens for DeviceGroup {
 }
 
 
-/// A procedural macro for the `test_device` attribute.
+/// A procedural macro for the `test` attribute.
 ///
 /// The attribute can be used to define a test that accepts a Nitrokey
 /// device object (which can be any of `nitrokey::Pro`,
@@ -204,8 +204,7 @@ impl quote::ToTokens for DeviceGroup {
 /// ```rust,no_run
 /// // Note that no test would actually run, regardless of `no_run`,
 /// // because we do not invoke the function.
-/// # use nitrokey_test::test_device;
-/// #[test_device]
+/// #[nitrokey_test::test]
 /// fn some_nitrokey_test(device: nitrokey::DeviceWrapper) {
 ///   assert_eq!(device.get_serial_number().unwrap().len(), 8);
 /// }
@@ -213,8 +212,7 @@ impl quote::ToTokens for DeviceGroup {
 ///
 /// Test functionality on a Nitrokey Pro device:
 /// ```rust,no_run
-/// # use nitrokey_test::test_device;
-/// #[test_device]
+/// #[nitrokey_test::test]
 /// fn some_pro_test(device: nitrokey::Pro) {
 ///   assert_eq!(device.get_model(), nitrokey::Model::Pro);
 /// }
@@ -222,8 +220,7 @@ impl quote::ToTokens for DeviceGroup {
 ///
 /// Test functionality on a Nitrokey Storage device:
 /// ```rust,no_run
-/// # use nitrokey_test::test_device;
-/// #[test_device]
+/// #[nitrokey_test::test]
 /// fn some_storage_test(device: nitrokey::Storage) {
 ///   assert_eq!(device.get_model(), nitrokey::Model::Storage);
 /// }
@@ -231,16 +228,15 @@ impl quote::ToTokens for DeviceGroup {
 ///
 /// Test functionality when no device is present:
 /// ```rust,no_run
-/// # use nitrokey_test::test_device;
-/// #[test_device]
+/// #[nitrokey_test::test]
 /// fn no_device() {
 ///   assert!(nitrokey::connect().is_err());
 /// }
 /// ```
 #[proc_macro_attribute]
-pub fn test_device(attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
   // Bail out if user tried to pass additional arguments. E.g.,
-  // #[test_device(foo = "bar")
+  // #[nitrokey_test::test(foo = "bar")
   if !attr.is_empty() {
     panic!("unsupported attributes supplied: {}", attr);
   }
@@ -499,13 +495,17 @@ where
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+  use super::determine_device;
+  use super::SupportedDevice;
+
+  use quote::quote;
+  use syn;
 
 
   #[test]
   fn determine_nitrokey_none() {
     let input: syn::ItemFn = syn::parse_quote! {
-      #[test_device]
+      #[nitrokey_test::test]
       fn test_none() {}
     };
     let dev_type = determine_device(&input.decl.inputs);
@@ -516,7 +516,7 @@ mod tests {
   #[test]
   fn determine_nitrokey_pro() {
     let input: syn::ItemFn = syn::parse_quote! {
-      #[test_device]
+      #[nitrokey_test::test]
       fn test_pro(device: nitrokey::Pro) {}
     };
     let dev_type = determine_device(&input.decl.inputs);
@@ -527,7 +527,7 @@ mod tests {
   #[test]
   fn determine_nitrokey_storage() {
     let input: syn::ItemFn = syn::parse_quote! {
-      #[test_device]
+      #[nitrokey_test::test]
       fn test_storage(device: nitrokey::Storage) {}
     };
     let dev_type = determine_device(&input.decl.inputs);
@@ -538,7 +538,7 @@ mod tests {
   #[test]
   fn determine_any_nitrokey() {
     let input: syn::ItemFn = syn::parse_quote! {
-      #[test_device]
+      #[nitrokey_test::test]
       fn test_any(device: nitrokey::DeviceWrapper) {}
     };
     let dev_type = determine_device(&input.decl.inputs);
@@ -550,7 +550,7 @@ mod tests {
   #[should_panic(expected = "functions used as Nitrokey tests can only have zero or one argument")]
   fn determine_wrong_argument_count() {
     let input: syn::ItemFn = syn::parse_quote! {
-      #[test_device]
+      #[nitrokey_test::test]
       fn test_pro(device: nitrokey::Pro, _: i32) {}
     };
     let _ = determine_device(&input.decl.inputs);
@@ -560,7 +560,7 @@ mod tests {
   #[should_panic(expected = "unexpected function argument signature: & self")]
   fn determine_wrong_function_type() {
     let input: syn::ItemFn = syn::parse_quote! {
-      #[test_device]
+      #[nitrokey_test::test]
       fn test_self(&self) {}
     };
     let _ = determine_device(&input.decl.inputs);
@@ -571,7 +571,7 @@ mod tests {
                              :: DeviceWrapper (expected owned object)")]
   fn determine_wrong_argument_type() {
     let input: syn::ItemFn = syn::parse_quote! {
-      #[test_device]
+      #[nitrokey_test::test]
       fn test_any(device: &nitrokey::DeviceWrapper) {}
     };
     let _ = determine_device(&input.decl.inputs);
@@ -581,7 +581,7 @@ mod tests {
   #[should_panic(expected = "unsupported function argument type: FooBarBaz")]
   fn determine_invalid_argument_type() {
     let input: syn::ItemFn = syn::parse_quote! {
-      #[test_device]
+      #[nitrokey_test::test]
       fn test_foobarbaz(device: nitrokey::FooBarBaz) {}
     };
     let _ = determine_device(&input.decl.inputs);
