@@ -240,6 +240,8 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
   if !attr.is_empty() {
     panic!("unsupported attributes supplied: {}", attr);
   }
+  // Make clippy happy.
+  drop(attr);
 
   let input = syn::parse_macro_input!(item as syn::ItemFn);
   let dev_type = determine_device(&input.decl.inputs);

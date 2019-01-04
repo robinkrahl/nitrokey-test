@@ -13,6 +13,9 @@ description = """
 Supporting test infrastructure for the nitrokey crate and others using it.
 """
 
+[badges]
+gitlab = { repository = "d-e-s-o/nitrokey-test", branch = "master" }
+
 [lib]
 proc-macro = true
 
