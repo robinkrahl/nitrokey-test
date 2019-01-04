@@ -98,6 +98,8 @@ use syn::punctuated;
 /// A type used to determine what Nitrokey device to test on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SupportedDevice {
+  /// No device must be present.
+  None,
   /// Only the Nitrokey Pro is supported.
   Pro,
   /// Only the Nitrokey Storage is supported.
@@ -111,6 +113,9 @@ enum SupportedDevice {
 /// whether to wrap it.
 #[derive(Clone, Copy, Debug)]
 enum EmittedDevice {
+  /// Bail out if the connection succeeds, i.e., only run when no device
+  /// is present.
+  None,
   /// Connect to and pass in a `nitrokey::Pro`.
   Pro,
   /// Connect to and pass in a `nitrokey::Storage`.
@@ -131,6 +136,10 @@ enum EmittedDevice {
 /// `nitrokey::DeviceWrapper`, the test will actually be invoked for a
 /// Nitrokey Pro as well as a Nitrokey Storage. Irrespective, the test
 /// is skipped if the device cannot be found.
+/// It also supports running tests when no device is present, which is
+/// required for tasks such as handling of error conditions. The test
+/// function must not accept a device object in that case (i.e., have no
+/// parameters).
 ///
 /// # Example
 ///
@@ -163,6 +172,15 @@ enum EmittedDevice {
 ///   assert_eq!(device.get_model(), nitrokey::Model::Storage);
 /// }
 /// ```
+///
+/// Test functionality when no device is present:
+/// ```rust,no_run
+/// # use nitrokey_test::test_device;
+/// #[test_device]
+/// fn no_device() {
+///   assert!(nitrokey::connect().is_err());
+/// }
+/// ```
 #[proc_macro_attribute]
 pub fn test_device(attr: TokenStream, item: TokenStream) -> TokenStream {
   // Bail out if user tried to pass additional arguments. E.g.,
@@ -175,6 +193,10 @@ pub fn test_device(attr: TokenStream, item: TokenStream) -> TokenStream {
   let dev_type = determine_device(&input.decl.inputs);
 
   match dev_type {
+    SupportedDevice::None => {
+      let name = format!("{}", &input.ident);
+      expand_wrapper(name, EmittedDevice::None, &input)
+    },
     SupportedDevice::Pro => {
       let name = format!("{}", &input.ident);
       expand_wrapper(name, EmittedDevice::Pro, &input)
@@ -229,7 +251,7 @@ fn expand_serializer() -> Tokens {
   }
 }
 
-fn expand_connect(dev_type: Tokens, ret_type: &syn::ReturnType) -> Tokens {
+fn expand_connect(dev_type: Tokens, ret_type: &syn::ReturnType, skip_if_present: bool) -> Tokens {
   let (ret, check) = match ret_type {
     syn::ReturnType::Default => (quote! { return }, quote! {.unwrap()}),
     // The only two valid return types for a test function are no return
@@ -240,15 +262,27 @@ fn expand_connect(dev_type: Tokens, ret_type: &syn::ReturnType) -> Tokens {
     syn::ReturnType::Type(_, _) => (quote! { return Ok(()) }, quote! {?}),
   };
 
+  let connect = if skip_if_present {
+    quote! {::nitrokey::connect()}
+  } else {
+    quote! {::nitrokey::#dev_type::connect()}
+  };
+
+  // TODO: There should be a better error code returned on the
+  //       `nitrokey` side of things.
+  let skip = if skip_if_present {
+    quote! {let Err(::nitrokey::CommandError::Undefined) = result {} else}
+  } else {
+    quote! {let Err(::nitrokey::CommandError::Undefined) = result}
+  };
+
   quote! {
     {
       use ::std::io::Write;
       // Check if we can connect. Skip the test if we can't due to the
       // device not being present.
-      // TODO: There should be a better error code returned on the
-      //       `nitrokey` side of things.
-      let result = ::nitrokey::#dev_type::connect();
-      if let Err(::nitrokey::CommandError::Undefined) = result {
+      let result = #connect;
+      if #skip {
         // Note that tests have a "special" stdout, used by println!()
         // for example, that has a thread-local buffer and is not
         // actually printed by default but only when the --nocapture
@@ -292,14 +326,23 @@ where
     syn::ReturnType::Type(_, type_) => quote! {#type_},
   };
 
-  let connect_pro = expand_connect(quote! { Pro }, &decl.output);
-  let connect_storage = expand_connect(quote! { Storage }, &decl.output);
+  let connect_pro = expand_connect(quote! { Pro }, &decl.output, false);
+  let connect_storage = expand_connect(quote! { Storage }, &decl.output, false);
 
   let connect = match device {
-    EmittedDevice::Pro => connect_pro,
-    EmittedDevice::Storage => connect_storage,
-    EmittedDevice::WrappedPro => quote! {::nitrokey::DeviceWrapper::Pro(#connect_pro)},
-    EmittedDevice::WrappedStorage => quote! {::nitrokey::DeviceWrapper::Storage(#connect_storage)},
+    EmittedDevice::None => expand_connect(quote! {}, &decl.output, true),
+    EmittedDevice::Pro => quote! { let device = #connect_pro },
+    EmittedDevice::Storage => quote! { let device = #connect_storage },
+    EmittedDevice::WrappedPro => {
+      quote! {
+        let device = ::nitrokey::DeviceWrapper::Pro(#connect_pro)
+      }
+    },
+    EmittedDevice::WrappedStorage => {
+      quote! {
+        let device = ::nitrokey::DeviceWrapper::Storage(#connect_storage)
+      }
+    },
   };
 
   let serializer = expand_serializer();
@@ -317,23 +360,14 @@ where
       let _guard = __nitrokey_mutex()
         .lock()
         .map_err(|err| err.into_inner());
-      let device = #connect;
+      #connect;
       #body
     }
   }
 }
 
-/// Determine the kind of Nitrokey device a test function support, based
-/// on the type of its only parameter.
-fn determine_device<P>(args: &punctuated::Punctuated<syn::FnArg, P>) -> SupportedDevice
-where
-  P: quote::ToTokens,
-{
-  if args.len() != 1 {
-    panic!("functions used as Nitrokey tests can only have a single argument");
-  }
-
-  match args.first().unwrap().value() {
+fn determine_device_for_arg(arg: &syn::FnArg) -> SupportedDevice {
+  match arg {
     syn::FnArg::Captured(arg) => {
       let type_ = &arg.ty;
       match type_ {
@@ -354,7 +388,20 @@ where
                     quote!{#type_}),
       }
     }
-    _ => panic!("unexpected function argument signature: {}", quote! {#args}),
+    _ => panic!("unexpected function argument signature: {}", quote! {#arg}),
+  }
+}
+
+/// Determine the kind of Nitrokey device a test function support, based
+/// on the type of its only parameter.
+fn determine_device<P>(args: &punctuated::Punctuated<syn::FnArg, P>) -> SupportedDevice
+where
+  P: quote::ToTokens,
+{
+  match args.len() {
+    0 => SupportedDevice::None,
+    1 => determine_device_for_arg(args.first().unwrap().value()),
+    _ => panic!("functions used as Nitrokey tests can only have zero or one argument"),
   }
 }
 
@@ -363,6 +410,17 @@ where
 mod tests {
   use super::*;
 
+
+  #[test]
+  fn determine_nitrokey_none() {
+    let input: syn::ItemFn = syn::parse_quote! {
+      #[test_device]
+      fn test_none() {}
+    };
+    let dev_type = determine_device(&input.decl.inputs);
+
+    assert_eq!(dev_type, SupportedDevice::None)
+  }
 
   #[test]
   fn determine_nitrokey_pro() {
@@ -398,7 +456,7 @@ mod tests {
   }
 
   #[test]
-  #[should_panic(expected = "functions used as Nitrokey tests can only have a single argument")]
+  #[should_panic(expected = "functions used as Nitrokey tests can only have zero or one argument")]
   fn determine_wrong_argument_count() {
     let input: syn::ItemFn = syn::parse_quote! {
       #[test_device]
