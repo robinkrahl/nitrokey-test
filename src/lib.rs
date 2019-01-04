@@ -127,6 +127,19 @@ enum EmittedDevice {
 }
 
 
+/// The group a particular device belongs to.
+#[derive(Clone, Copy, Debug)]
+enum DeviceGroup {
+  /// The group encompassing all tests that require no device to be
+  /// present.
+  No,
+  /// The group containing all tests for the Nitrokey Pro.
+  Pro,
+  /// The group containing all tests for the Nitrokey Storage.
+  Storage,
+}
+
+
 /// A procedural macro for the `test_device` attribute.
 ///
 /// The attribute can be used to define a test that accepts a Nitrokey
@@ -251,7 +264,7 @@ fn expand_serializer() -> Tokens {
   }
 }
 
-fn expand_connect(dev_type: Tokens, ret_type: &syn::ReturnType, skip_if_present: bool) -> Tokens {
+fn expand_connect(group: DeviceGroup, ret_type: &syn::ReturnType) -> Tokens {
   let (ret, check) = match ret_type {
     syn::ReturnType::Default => (quote! { return }, quote! {.unwrap()}),
     // The only two valid return types for a test function are no return
@@ -262,15 +275,15 @@ fn expand_connect(dev_type: Tokens, ret_type: &syn::ReturnType, skip_if_present:
     syn::ReturnType::Type(_, _) => (quote! { return Ok(()) }, quote! {?}),
   };
 
-  let connect = if skip_if_present {
-    quote! {::nitrokey::connect()}
-  } else {
-    quote! {::nitrokey::#dev_type::connect()}
+  let connect = match group {
+    DeviceGroup::No => quote! { ::nitrokey::connect() },
+    DeviceGroup::Pro => quote! { ::nitrokey::Pro::connect() },
+    DeviceGroup::Storage => quote! { ::nitrokey::Storage::connect() },
   };
 
   // TODO: There should be a better error code returned on the
   //       `nitrokey` side of things.
-  let skip = if skip_if_present {
+  let skip = if let DeviceGroup::No = group {
     quote! {let Err(::nitrokey::CommandError::Undefined) = result {} else}
   } else {
     quote! {let Err(::nitrokey::CommandError::Undefined) = result}
@@ -326,11 +339,11 @@ where
     syn::ReturnType::Type(_, type_) => quote! {#type_},
   };
 
-  let connect_pro = expand_connect(quote! { Pro }, &decl.output, false);
-  let connect_storage = expand_connect(quote! { Storage }, &decl.output, false);
+  let connect_pro = expand_connect(DeviceGroup::Pro, &decl.output);
+  let connect_storage = expand_connect(DeviceGroup::Storage, &decl.output);
 
   let connect = match device {
-    EmittedDevice::None => expand_connect(quote! {}, &decl.output, true),
+    EmittedDevice::None => expand_connect(DeviceGroup::No, &decl.output),
     EmittedDevice::Pro => quote! { let device = #connect_pro },
     EmittedDevice::Storage => quote! { let device = #connect_storage },
     EmittedDevice::WrappedPro => {
