@@ -354,15 +354,15 @@ fn expand_connect(group: DeviceGroup, ret_type: &syn::ReturnType) -> Tokens {
               if group == #group {
                 #connect_cond
               } else {
-                println!("skipped");
+                ::std::println!("skipped");
                 #ret
               }
             },
-            x => panic!("unsupported {} value: {}", #NITROKEY_TEST_GROUP, x),
+            x => ::std::panic!("unsupported {} value: {}", #NITROKEY_TEST_GROUP, x),
           }
         },
         Err(::std::env::VarError::NotUnicode(_)) => {
-          panic!("{} value is not valid unicode", #NITROKEY_TEST_GROUP)
+          ::std::panic!("{} value is not valid unicode", #NITROKEY_TEST_GROUP)
         },
         Err(::std::env::VarError::NotPresent) => {
           // Check if we can connect. Skip the test if we can't due to the
@@ -388,7 +388,7 @@ fn expand_connect(group: DeviceGroup, ret_type: &syn::ReturnType) -> Tokens {
             // testing infrastructure and there is nothing we can do
             // about that. It is a surprise, though, that even the
             // thread-locally buffered version has this problem.
-            println!("skipped");
+            ::std::println!("skipped");
             #ret
           }
           #result
