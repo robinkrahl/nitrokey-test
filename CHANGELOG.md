@@ -1,5 +1,5 @@
-Unreleased
-----------
+0.1.1
+-----
 - Properly use absolutely qualified macros in generated code
 - Enabled CI pipeline comprising building, testing, and linting of the
   project
