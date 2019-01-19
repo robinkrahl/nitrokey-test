@@ -1,3 +1,8 @@
+Unreleased
+----------
+- Adjusted error handling to be compatible with `nitrokey` version `0.4`
+
+
 0.1.1
 -----
 - Properly use absolutely qualified macros in generated code
