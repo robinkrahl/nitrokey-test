@@ -328,12 +328,10 @@ fn expand_connect(group: DeviceGroup, ret_type: &syn::ReturnType) -> Tokens {
     quote! { #connect#check }
   };
 
-  // TODO: There should be a better error code returned on the
-  //       `nitrokey` side of things.
   let skip = if let DeviceGroup::No = group {
-    quote! {let Err(::nitrokey::CommandError::Undefined) = result {} else}
+    quote! {let Err(::nitrokey::Error::CommunicationError(::nitrokey::CommunicationError::NotConnected)) = result {} else}
   } else {
-    quote! {let Err(::nitrokey::CommandError::Undefined) = result}
+    quote! {let Err(::nitrokey::Error::CommunicationError(::nitrokey::CommunicationError::NotConnected)) = result}
   };
 
   let result = if let DeviceGroup::No = group {
