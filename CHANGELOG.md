@@ -1,6 +1,8 @@
 Unreleased
 ----------
 - Added support for test function attributes, e.g., `#[ignore]`
+- Introduced `nitrokey-test-state` crate containing state needed to
+  achieve mutual exclusion of tests
 
 
 0.2.0

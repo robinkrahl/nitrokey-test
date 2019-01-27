@@ -1,0 +1,23 @@
+[package]
+name = "nitrokey-test-state"
+version = "0.1.0"
+authors = ["Daniel Mueller <deso@posteo.net>"]
+edition = "2018"
+license = "GPL-3.0-or-later"
+homepage = "https://crates.io/crates/nitrokey-test"
+repository = "https://github.com/d-e-s-o/nitrokey-test.git"
+readme = "README.md"
+categories = [
+  "development-tools::procedural-macro-helpers",
+  "development-tools::testing",
+  "development-tools",
+]
+keywords = ["nitrokey", "test"]
+description = """
+State required and used by the nitrokey-test crate.
+"""
+
+[badges]
+gitlab = { repository = "d-e-s-o/nitrokey-test", branch = "master" }
+
+[dependencies]
