@@ -28,3 +28,6 @@ version = "0.6"
 [dependencies.syn]
 version = "0.15"
 features = ["full"]
+
+[dev-dependencies.nitrokey]
+version = ">=0.4.0-alpha.0"

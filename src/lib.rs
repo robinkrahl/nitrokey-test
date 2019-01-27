@@ -408,6 +408,7 @@ where
   // cannot be interpolated with quote!{} for lack of quote::ToTokens
   // implementations.
   let name = Ident::new(fn_name.as_ref(), Span::call_site());
+  let attrs = &wrappee.attrs;
   let decl = &wrappee.decl;
   let body = &wrappee.block;
   let ret_type = match &decl.output {
@@ -439,6 +440,7 @@ where
     #serializer
 
     #[test]
+    #(#attrs)*
     fn #name() -> #ret_type {
       // Note that mutexes (and other locks) come with a poisoning
       // mechanism that (by default) prevents an acquisition of a mutex

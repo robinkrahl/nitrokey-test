@@ -1,3 +1,8 @@
+Unreleased
+----------
+- Added support for test function attributes, e.g., `#[ignore]`
+
+
 0.2.0
 -----
 - Adjusted error handling to be compatible with `nitrokey` version `0.4`
