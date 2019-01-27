@@ -20,7 +20,6 @@
 #![recursion_limit = "128"]
 #![deny(
   dead_code,
-  duplicate_associated_type_bindings,
   illegal_floating_point_literal_pattern,
   improper_ctypes,
   intra_doc_link_resolution_failure,
