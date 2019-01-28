@@ -28,3 +28,18 @@ fn ignore_no_dev() {
 fn ignore_any(_device: nitrokey::DeviceWrapper) {
   panic!("should be ignored")
 }
+
+
+/// A trait providing a method with a &mut self signature.
+trait MutableDevice {
+  fn test_mut(&mut self) -> bool {
+    true
+  }
+}
+
+impl MutableDevice for nitrokey::DeviceWrapper {}
+
+#[nitrokey_test::test]
+fn mutable_device(mut device: nitrokey::DeviceWrapper) {
+  assert!(device.test_mut())
+}

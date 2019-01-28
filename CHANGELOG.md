@@ -1,6 +1,7 @@
 Unreleased
 ----------
 - Added support for test function attributes, e.g., `#[ignore]`
+- Added support for mutable `device` arguments to test functions
 - Introduced `nitrokey-test-state` crate containing state needed to
   achieve mutual exclusion of tests
 
