@@ -17,6 +17,9 @@
 // * along with this program.  If not, see <http://www.gnu.org/licenses/>. *
 // *************************************************************************
 
+use nitrokey::Device;
+
+
 #[nitrokey_test::test]
 #[ignore]
 fn ignore_no_dev() {
@@ -42,4 +45,9 @@ impl MutableDevice for nitrokey::DeviceWrapper {}
 #[nitrokey_test::test]
 fn mutable_device(mut device: nitrokey::DeviceWrapper) {
   assert!(device.test_mut())
+}
+
+#[nitrokey_test::test]
+fn aribtrary_argument_name(foobarbaz: nitrokey::DeviceWrapper) {
+  let _ = foobarbaz.get_model();
 }

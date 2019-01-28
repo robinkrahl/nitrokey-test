@@ -86,7 +86,6 @@
 //! Right now we make a few simplifying assumptions that, although not
 //! changing what can be expressed and tested, can lead to unexpected
 //! error messages when not known:
-//! - the parameter naming the device to test on has to be `device`
 //! - the parameter has to be an owned object, not a reference
 //! - parameter types are pattern matched against "Storage", "Pro", and
 //!   "DeviceWrapper"; that means `use ... as` declarations will not work
@@ -241,7 +240,7 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
   drop(attr);
 
   let input = syn::parse_macro_input!(item as syn::ItemFn);
-  let (_, dev_type) = determine_device(&input.decl.inputs);
+  let dev_type = determine_device(&input.decl.inputs);
 
   match dev_type {
     SupportedDevice::None => {
@@ -367,6 +366,38 @@ fn expand_connect(group: DeviceGroup, ret_type: &syn::ReturnType) -> Tokens {
   }
 }
 
+fn expand_arg<P>(device: EmittedDevice, args: &punctuated::Punctuated<syn::FnArg, P>) -> Tokens
+where
+  P: quote::ToTokens,
+{
+  // Based on the device we want to emit a test function for we recreate
+  // the expected full path of the type. That is necessary because
+  // client code may have a "use" and may just contain a `Pro`, for
+  // example, while we really need to work with the absolute path.
+  let arg_type = match device {
+    EmittedDevice::None => quote! {},
+    EmittedDevice::Pro => quote! { ::nitrokey::Pro },
+    EmittedDevice::Storage => quote! { ::nitrokey::Storage },
+    EmittedDevice::WrappedPro |
+    EmittedDevice::WrappedStorage => quote! { ::nitrokey::DeviceWrapper },
+  };
+
+  match args.first() {
+    Some(arg) => match arg.value() {
+      syn::FnArg::Captured(captured) => {
+        let arg = syn::FnArg::Captured(syn::ArgCaptured {
+          pat: captured.pat.clone(),
+          colon_token: captured.colon_token,
+          ty: syn::Type::Path(syn::parse_quote! { #arg_type }),
+        });
+        quote! { #arg }
+      }
+      _ => panic!("unexpected test function argument"),
+    },
+    None => quote! {},
+  }
+}
+
 /// Emit code for a wrapper function around a Nitrokey test function.
 fn expand_wrapper<S>(fn_name: S, device: EmittedDevice, wrappee: &syn::ItemFn) -> Tokens
 where
@@ -380,13 +411,8 @@ where
   let attrs = &wrappee.attrs;
   let decl = &wrappee.decl;
   let body = &wrappee.block;
-  let (mutable, _) = determine_device(&wrappee.decl.inputs);
-
-  let mutable = if mutable {
-    quote! { mut }
-  } else {
-    quote! { }
-  };
+  let test_name = &wrappee.ident;
+  let test_arg = expand_arg(device, &decl.inputs);
 
   let ret_type = match &decl.output {
     syn::ReturnType::Default => quote! {()},
@@ -396,18 +422,18 @@ where
   let connect_pro = expand_connect(DeviceGroup::Pro, &decl.output);
   let connect_storage = expand_connect(DeviceGroup::Storage, &decl.output);
 
-  let connect = match device {
+  let test_call = match device {
     EmittedDevice::None => expand_connect(DeviceGroup::No, &decl.output),
-    EmittedDevice::Pro => quote! { let #mutable device = #connect_pro },
-    EmittedDevice::Storage => quote! { let #mutable device = #connect_storage },
+    EmittedDevice::Pro => quote! { #test_name(#connect_pro) },
+    EmittedDevice::Storage => quote! { #test_name(#connect_storage) },
     EmittedDevice::WrappedPro => {
       quote! {
-        let #mutable device = ::nitrokey::DeviceWrapper::Pro(#connect_pro)
+        #test_name(::nitrokey::DeviceWrapper::Pro(#connect_pro))
       }
     },
     EmittedDevice::WrappedStorage => {
       quote! {
-        let #mutable device = ::nitrokey::DeviceWrapper::Storage(#connect_storage)
+        #test_name(::nitrokey::DeviceWrapper::Storage(#connect_storage))
       }
     },
   };
@@ -416,6 +442,10 @@ where
     #[test]
     #(#attrs)*
     fn #name() -> #ret_type {
+      fn #test_name(#test_arg) -> #ret_type {
+        #body
+      }
+
       // Note that mutexes (and other locks) come with a poisoning
       // mechanism that (by default) prevents an acquisition of a mutex
       // that was held while the thread holding it panic'ed. We don't
@@ -425,8 +455,7 @@ where
       let _guard = ::nitrokey_test_state::mutex()
         .lock()
         .map_err(|err| err.into_inner());
-      #connect;
-      #body
+      #test_call
     }
   }
 }
@@ -459,27 +488,13 @@ fn determine_device_for_arg(arg: &syn::FnArg) -> SupportedDevice {
 
 /// Determine the kind of Nitrokey device a test function support, based
 /// on the type of its only parameter.
-fn determine_device<P>(args: &punctuated::Punctuated<syn::FnArg, P>) -> (bool, SupportedDevice)
+fn determine_device<P>(args: &punctuated::Punctuated<syn::FnArg, P>) -> SupportedDevice
 where
   P: quote::ToTokens,
 {
   match args.len() {
-    0 => (false, SupportedDevice::None),
-    1 => {
-      let first = args.first().unwrap();
-      let arg = first.value();
-      let mutable = if let syn::FnArg::Captured(syn::ArgCaptured{pat, ..}) = arg {
-        if let syn::Pat::Ident(syn::PatIdent{mutability, ..}) = pat {
-          mutability.is_some()
-        } else {
-          false
-        }
-      } else {
-        false
-      };
-      let device = determine_device_for_arg(arg);
-      (mutable, device)
-    },
+    0 => SupportedDevice::None,
+    1 => determine_device_for_arg(&args[0]),
     _ => panic!("functions used as Nitrokey tests can only have zero or one argument"),
   }
 }
@@ -502,7 +517,7 @@ mod tests {
     };
     let dev_type = determine_device(&input.decl.inputs);
 
-    assert_eq!(dev_type, (false, SupportedDevice::None))
+    assert_eq!(dev_type, SupportedDevice::None)
   }
 
   #[test]
@@ -513,18 +528,7 @@ mod tests {
     };
     let dev_type = determine_device(&input.decl.inputs);
 
-    assert_eq!(dev_type, (false, SupportedDevice::Pro))
-  }
-
-  #[test]
-  fn determine_mut_nitrokey_pro() {
-    let input: syn::ItemFn = syn::parse_quote! {
-      #[nitrokey_test::test]
-      fn test_pro(mut device: nitrokey::Pro) {}
-    };
-    let dev_type = determine_device(&input.decl.inputs);
-
-    assert_eq!(dev_type, (true, SupportedDevice::Pro))
+    assert_eq!(dev_type, SupportedDevice::Pro)
   }
 
   #[test]
@@ -535,18 +539,7 @@ mod tests {
     };
     let dev_type = determine_device(&input.decl.inputs);
 
-    assert_eq!(dev_type, (false, SupportedDevice::Storage))
-  }
-
-  #[test]
-  fn determine_mut_nitrokey_storage() {
-    let input: syn::ItemFn = syn::parse_quote! {
-      #[nitrokey_test::test]
-      fn test_storage(mut device: nitrokey::Storage) {}
-    };
-    let dev_type = determine_device(&input.decl.inputs);
-
-    assert_eq!(dev_type, (true, SupportedDevice::Storage))
+    assert_eq!(dev_type, SupportedDevice::Storage)
   }
 
   #[test]
@@ -557,18 +550,7 @@ mod tests {
     };
     let dev_type = determine_device(&input.decl.inputs);
 
-    assert_eq!(dev_type, (false, SupportedDevice::Any))
-  }
-
-  #[test]
-  fn determine_any_mut_nitrokey() {
-    let input: syn::ItemFn = syn::parse_quote! {
-      #[nitrokey_test::test]
-      fn test_any(mut device: nitrokey::DeviceWrapper) {}
-    };
-    let dev_type = determine_device(&input.decl.inputs);
-
-    assert_eq!(dev_type, (true, SupportedDevice::Any))
+    assert_eq!(dev_type, SupportedDevice::Any)
   }
 
   #[test]
