@@ -398,6 +398,29 @@ where
   }
 }
 
+fn expand_call(device: EmittedDevice, wrappee: &syn::ItemFn) -> Tokens {
+  let test_name = &wrappee.ident;
+  let decl = &wrappee.decl;
+  let connect_pro = expand_connect(DeviceGroup::Pro, &decl.output);
+  let connect_storage = expand_connect(DeviceGroup::Storage, &decl.output);
+
+  match device {
+    EmittedDevice::None => expand_connect(DeviceGroup::No, &decl.output),
+    EmittedDevice::Pro => quote! { #test_name(#connect_pro) },
+    EmittedDevice::Storage => quote! { #test_name(#connect_storage) },
+    EmittedDevice::WrappedPro => {
+      quote! {
+        #test_name(::nitrokey::DeviceWrapper::Pro(#connect_pro))
+      }
+    },
+    EmittedDevice::WrappedStorage => {
+      quote! {
+        #test_name(::nitrokey::DeviceWrapper::Storage(#connect_storage))
+      }
+    },
+  }
+}
+
 /// Emit code for a wrapper function around a Nitrokey test function.
 fn expand_wrapper<S>(fn_name: S, device: EmittedDevice, wrappee: &syn::ItemFn) -> Tokens
 where
@@ -413,29 +436,11 @@ where
   let body = &wrappee.block;
   let test_name = &wrappee.ident;
   let test_arg = expand_arg(device, &decl.inputs);
+  let test_call = expand_call(device, wrappee);
 
   let ret_type = match &decl.output {
     syn::ReturnType::Default => quote! {()},
     syn::ReturnType::Type(_, type_) => quote! {#type_},
-  };
-
-  let connect_pro = expand_connect(DeviceGroup::Pro, &decl.output);
-  let connect_storage = expand_connect(DeviceGroup::Storage, &decl.output);
-
-  let test_call = match device {
-    EmittedDevice::None => expand_connect(DeviceGroup::No, &decl.output),
-    EmittedDevice::Pro => quote! { #test_name(#connect_pro) },
-    EmittedDevice::Storage => quote! { #test_name(#connect_storage) },
-    EmittedDevice::WrappedPro => {
-      quote! {
-        #test_name(::nitrokey::DeviceWrapper::Pro(#connect_pro))
-      }
-    },
-    EmittedDevice::WrappedStorage => {
-      quote! {
-        #test_name(::nitrokey::DeviceWrapper::Storage(#connect_storage))
-      }
-    },
   };
 
   quote! {
