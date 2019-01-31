@@ -17,8 +17,44 @@
 // * along with this program.  If not, see <http://www.gnu.org/licenses/>. *
 // *************************************************************************
 
+use nitrokey::CommunicationError;
 use nitrokey::Device;
+use nitrokey::Error;
+use nitrokey::Model;
 
+
+#[nitrokey_test::test]
+fn no_dev() {
+  let error = nitrokey::connect().unwrap_err();
+  match error {
+    Error::CommunicationError(CommunicationError::NotConnected) => (),
+    _ => panic!("received unexpected error: {:?}", error),
+  }
+}
+
+#[nitrokey_test::test]
+fn pro(device: Pro) {
+  assert_eq!(device.get_model(), Model::Pro);
+  drop(device);
+
+  assert!(nitrokey::connect_model(Model::Pro).is_ok())
+}
+
+#[nitrokey_test::test]
+fn storage(device: Storage) {
+  assert_eq!(device.get_model(), Model::Storage);
+  drop(device);
+
+  assert!(nitrokey::connect_model(Model::Storage).is_ok())
+}
+
+#[nitrokey_test::test]
+fn any(device: DeviceWrapper) {
+  let model = device.get_model();
+  drop(device);
+
+  assert!(nitrokey::connect_model(model).is_ok())
+}
 
 #[nitrokey_test::test]
 #[ignore]
