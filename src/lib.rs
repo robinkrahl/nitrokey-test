@@ -149,6 +149,19 @@ enum EmittedDevice {
   WrappedStorage,
 }
 
+impl EmittedDevice {
+  /// Retrieve the group a device belongs to.
+  fn as_group(self) -> DeviceGroup {
+    match self {
+      EmittedDevice::None => DeviceGroup::No,
+      EmittedDevice::Pro |
+      EmittedDevice::WrappedPro => DeviceGroup::Pro,
+      EmittedDevice::Storage |
+      EmittedDevice::WrappedStorage => DeviceGroup::Storage,
+    }
+  }
+}
+
 
 /// The group a particular device belongs to.
 #[derive(Clone, Copy, Debug)]
@@ -401,23 +414,27 @@ where
 fn expand_call(device: EmittedDevice, wrappee: &syn::ItemFn) -> Tokens {
   let test_name = &wrappee.ident;
   let decl = &wrappee.decl;
-  let connect_pro = expand_connect(DeviceGroup::Pro, &decl.output);
-  let connect_storage = expand_connect(DeviceGroup::Storage, &decl.output);
+  let connect = expand_connect(device.as_group(), &decl.output);
 
-  match device {
-    EmittedDevice::None => expand_connect(DeviceGroup::No, &decl.output),
-    EmittedDevice::Pro => quote! { #test_name(#connect_pro) },
-    EmittedDevice::Storage => quote! { #test_name(#connect_storage) },
+  let call = match device {
+    EmittedDevice::None => quote! { #test_name() },
+    EmittedDevice::Pro |
+    EmittedDevice::Storage => quote! { #test_name(device) },
     EmittedDevice::WrappedPro => {
       quote! {
-        #test_name(::nitrokey::DeviceWrapper::Pro(#connect_pro))
+        #test_name(::nitrokey::DeviceWrapper::Pro(device))
       }
     },
     EmittedDevice::WrappedStorage => {
       quote! {
-        #test_name(::nitrokey::DeviceWrapper::Storage(#connect_storage))
+        #test_name(::nitrokey::DeviceWrapper::Storage(device))
       }
     },
+  };
+
+  quote! {
+    let device = #connect;
+    #call
   }
 }
 
