@@ -1,5 +1,5 @@
-Unreleased
-----------
+0.2.1
+-----
 - Added support for test function attributes, e.g., `#[ignore]`
 - Added support for mutable `device` arguments to test functions
 - Removed restriction of expecting an argument specifically named
