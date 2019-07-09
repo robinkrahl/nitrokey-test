@@ -439,14 +439,14 @@ fn expand_call(device: EmittedDevice, wrappee: &syn::ItemFn) -> Tokens {
     // not to skip the test.
     quote! {
       {
-        let mut manager = ::nitrokey::take().unwrap();
+        let mut manager = ::nitrokey::force_take().unwrap();
         let _ = #connect;
       }
       #call
     }
   } else {
     quote! {
-      let mut manager = ::nitrokey::take().unwrap();
+      let mut manager = ::nitrokey::force_take().unwrap();
       let device = #connect;
       #call
     }
